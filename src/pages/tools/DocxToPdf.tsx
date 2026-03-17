@@ -4,6 +4,7 @@ import { FileText, Download, RefreshCw, CheckCircle2, AlertCircle, Zap } from 'l
 import confetti from 'canvas-confetti';
 import mammoth from 'mammoth';
 import { jsPDF } from 'jspdf';
+import AdBlock from "../../components/AdBlock";
 
 export default function DocxToPdf() {
   const [file, setFile] = useState<File | null>(null);
@@ -156,6 +157,11 @@ export default function DocxToPdf() {
           </motion.div>
         )}
       </div>
+
+      {/* Ad Block */}
+      {file && (
+        <AdBlock />
+      )}
 
       <div className="glass p-8 rounded-[32px] bg-primary/5 border-primary/10">
         <h4 className="font-bold mb-4 flex items-center gap-2">
