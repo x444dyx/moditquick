@@ -1,9 +1,15 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { FileText, Download, RefreshCw, CheckCircle2, AlertCircle, Zap } from 'lucide-react';
-import confetti from 'canvas-confetti';
-import mammoth from 'mammoth';
-import { jsPDF } from 'jspdf';
+import React, { useState } from "react";
+import { motion } from "framer-motion";
+import {
+  FileText,
+  Download,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  Zap,
+} from "lucide-react";
+import confetti from "canvas-confetti";
+import { renderAsync } from "docx-preview";
 import AdBlock from "../../components/AdBlock";
 
 export default function DocxToPdf() {
@@ -14,77 +20,179 @@ export default function DocxToPdf() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      if (selectedFile.name.endsWith('.docx')) {
-        setFile(selectedFile);
-        setError(null);
-        setIsSuccess(false);
-      } else {
-        setError('Please select a valid .docx file');
-      }
+    if (!selectedFile) return;
+
+    if (!selectedFile.name.toLowerCase().endsWith(".docx")) {
+      setError("Please select a valid .docx file");
+      setFile(null);
+      setIsSuccess(false);
+      return;
     }
+
+    setFile(selectedFile);
+    setError(null);
+    setIsSuccess(false);
+  };
+
+  const waitForImages = async (root: HTMLElement) => {
+    const images = Array.from(root.querySelectorAll("img"));
+
+    await Promise.all(
+      images.map((img) => {
+        if (img.complete) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+        });
+      })
+    );
   };
 
   const convert = async () => {
     if (!file) return;
+
     setIsProcessing(true);
     setError(null);
     setIsSuccess(false);
-    
+
+    let host: HTMLDivElement | null = null;
+
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const { value: html } = await mammoth.convertToHtml({ arrayBuffer });
-      
-      // Create a hidden container for the HTML to render it for jspdf
-      const container = document.createElement('div');
-      container.style.width = '800px'; // Standard width
-      container.style.padding = '40px';
-      container.style.backgroundColor = 'white';
-      container.style.color = 'black';
-      container.style.position = 'absolute';
-      container.style.left = '-9999px';
-      container.innerHTML = `
-        <style>
-          h1 { font-size: 24pt; margin-bottom: 12pt; }
-          h2 { font-size: 18pt; margin-top: 12pt; margin-bottom: 6pt; }
-          p { margin-bottom: 10pt; line-height: 1.5; }
-          table { border-collapse: collapse; width: 100%; margin: 12pt 0; }
-          table, th, td { border: 1px solid black; padding: 8px; }
-          img { max-width: 100%; height: auto; }
-        </style>
-        ${html}
-      `;
-      document.body.appendChild(container);
 
-      const pdf = new jsPDF({
-        orientation: 'p',
-        unit: 'px',
-        format: 'a4',
-        hotfixes: ['px_scaling']
+      host = document.createElement("div");
+      host.style.position = "fixed";
+      host.style.left = "-99999px";
+      host.style.top = "0";
+      host.style.width = "794px";
+      host.style.background = "#ffffff";
+      document.body.appendChild(host);
+
+      const style = document.createElement("style");
+      style.innerHTML = `
+        .docx-wrapper { background: #fff !important; }
+
+        .docx {
+          width: 794px !important;
+          margin: 0 auto !important;
+          font-family: serif !important;
+          line-height: 1.6 !important;
+        }
+
+        .docx p {
+          margin: 0 0 12px 0 !important;
+        }
+
+        .docx table {
+          border-collapse: collapse !important;
+          width: 100% !important;
+        }
+
+        .docx td, .docx th {
+          border: 1px solid #000 !important;
+          padding: 6px !important;
+        }
+
+        .docx img {
+          max-width: 100% !important;
+          height: auto !important;
+        }
+
+        @media print {
+          body {
+            margin: 40px;
+          }
+        }
+      `;
+      host.appendChild(style);
+
+      await renderAsync(arrayBuffer, host, undefined, {
+        className: "docx",
+        inWrapper: true,
+        breakPages: true,
       });
 
-      await pdf.html(container, {
-        callback: function (doc) {
-          doc.save(`${file.name.replace('.docx', '')}.pdf`);
-          document.body.removeChild(container);
-          setIsSuccess(true);
-          confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { y: 0.6 },
-            colors: ['#1E7AE6', '#3EA1FF', '#FFFFFF']
-          });
-          setIsProcessing(false);
-        },
-        x: 0,
-        y: 0,
-        width: 445, // a4 width in px at 72 dpi is ~595, but we need to account for margins
-        windowWidth: 800
+      await waitForImages(host);
+
+      if ("fonts" in document) {
+        await (document as any).fonts.ready;
+      }
+
+      // 🔥 PRINT ENGINE
+      const printWindow = window.open("", "_blank");
+
+      if (!printWindow) {
+        throw new Error("Popup blocked. Please allow popups.");
+      }
+
+      printWindow.document.write(`
+  <html>
+    <head>
+      <title>${file.name}</title>
+      <style>
+        html, body {
+          margin: 0;
+          padding: 0;
+          background: white;
+        }
+
+        body {
+          padding: 40px;
+          font-family: serif;
+        }
+
+        .docx {
+          width: 100% !important;
+          max-width: 794px;
+          margin: 0 auto;
+        }
+
+        .docx-wrapper {
+          background: white !important;
+        }
+
+        table {
+          page-break-inside: avoid;
+        }
+
+        img {
+          max-width: 100%;
+        }
+
+        @page {
+          margin: 20mm;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="docx-container">
+        ${host.querySelector(".docx-wrapper")?.innerHTML || host.innerHTML}
+      </div>
+    </body>
+  </html>
+`);
+
+      printWindow.document.close();
+      printWindow.focus();
+
+      // slight delay ensures rendering completes
+      setTimeout(() => {
+        printWindow.print();
+      }, 500);
+
+      setIsSuccess(true);
+
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
       });
 
     } catch (err: any) {
-      console.error('Conversion failed:', err);
-      setError(err.message || 'Failed to convert document. Make sure it is a valid DOCX file.');
+      console.error(err);
+      setError(err.message || "Conversion failed");
+    } finally {
+      if (host) document.body.removeChild(host);
       setIsProcessing(false);
     }
   };
@@ -93,13 +201,20 @@ export default function DocxToPdf() {
     <div className="max-w-4xl mx-auto px-6 py-12 space-y-8">
       <div className="space-y-2 text-center">
         <h1 className="text-4xl font-bold">DOCX to PDF</h1>
-        <p className="text-white/60">Convert Word documents to PDF format with layout preservation.</p>
+        <p className="text-white/60">
+          High-quality conversion using browser print engine.
+        </p>
       </div>
 
       <div className="space-y-8">
         {!file ? (
           <label className="glass rounded-[40px] border-2 border-dashed border-white/10 hover:border-primary/50 transition-all cursor-pointer flex flex-col items-center justify-center p-24 group">
-            <input type="file" className="hidden" accept=".docx" onChange={handleFileChange} />
+            <input
+              type="file"
+              className="hidden"
+              accept=".docx"
+              onChange={handleFileChange}
+            />
             <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
               <FileText className="text-primary" size={32} />
             </div>
@@ -107,7 +222,7 @@ export default function DocxToPdf() {
             <p className="text-white/40">or click to browse files</p>
           </label>
         ) : (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="glass p-8 rounded-[40px] space-y-8"
@@ -116,10 +231,12 @@ export default function DocxToPdf() {
               <div className="w-24 h-24 rounded-3xl bg-primary/10 flex items-center justify-center text-primary">
                 <FileText size={48} />
               </div>
-              
+
               <div className="text-center space-y-1">
                 <h3 className="text-xl font-bold">{file.name}</h3>
-                <p className="text-white/40">{(file.size / 1024).toFixed(1)} KB</p>
+                <p className="text-white/40">
+                  {(file.size / 1024).toFixed(1)} KB
+                </p>
               </div>
 
               {error && (
@@ -132,7 +249,7 @@ export default function DocxToPdf() {
               {isSuccess && (
                 <div className="flex items-center gap-2 text-emerald-500 text-sm bg-emerald-500/10 px-4 py-2 rounded-xl">
                   <CheckCircle2 size={16} />
-                  Successfully converted and downloaded!
+                  Print dialog opened successfully!
                 </div>
               )}
 
@@ -142,12 +259,20 @@ export default function DocxToPdf() {
                   disabled={isProcessing}
                   className="btn-primary flex-1 flex items-center justify-center gap-2"
                 >
-                  {isProcessing ? <RefreshCw className="animate-spin" size={18} /> : <Download size={18} />}
-                  {isProcessing ? 'Converting...' : 'Convert to PDF'}
+                  {isProcessing ? (
+                    <RefreshCw className="animate-spin" size={18} />
+                  ) : (
+                    <Download size={18} />
+                  )}
+                  {isProcessing ? "Preparing..." : "Convert to PDF"}
                 </button>
-                
-                <button 
-                  onClick={() => { setFile(null); setIsSuccess(false); setError(null); }}
+
+                <button
+                  onClick={() => {
+                    setFile(null);
+                    setIsSuccess(false);
+                    setError(null);
+                  }}
                   className="glass px-6 py-3 rounded-full text-sm text-white/40 hover:text-white transition-colors"
                 >
                   Change File
@@ -158,10 +283,7 @@ export default function DocxToPdf() {
         )}
       </div>
 
-      {/* Ad Block */}
-      {file && (
-        <AdBlock />
-      )}
+      {file && !isProcessing && <AdBlock />}
 
       <div className="glass p-8 rounded-[32px] bg-primary/5 border-primary/10">
         <h4 className="font-bold mb-4 flex items-center gap-2">
@@ -170,20 +292,16 @@ export default function DocxToPdf() {
         </h4>
         <ul className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-white/50">
           <li className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5" />
-            <span>100% Private: Your document never leaves your browser.</span>
+            <span>Better formatting via browser print engine</span>
           </li>
           <li className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5" />
-            <span>Fast: Instant conversion using local processing.</span>
+            <span>No upload required</span>
           </li>
           <li className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5" />
-            <span>No Limits: Convert as many files as you want for free.</span>
+            <span>More accurate tables and layout</span>
           </li>
           <li className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5" />
-            <span>High Quality: Preserves text formatting and structure.</span>
+            <span>Instant processing</span>
           </li>
         </ul>
       </div>
